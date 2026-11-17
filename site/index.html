@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Estimateur DVF</title>
+<meta name="description" content="Estimez un appartement ou une maison à partir des ventes notariées réelles (DVF) autour de l'adresse.">
+<link rel="icon" href="icones/icone.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icones/icone-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#2c5a88">
+<meta name="apple-mobile-web-app-title" content="Estimateur DVF">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+/* Plan cadastral : encre bleue sur papier calque, une seule couleur vive (ocre) pour le bien estimé */
+:root{
+  --bg:#f2f4f6; --surface:#ffffff; --ink:#18263a; --muted:#5a6878; --line:#d3dae2; --grid:#e3e8ed;
+  --accent:#2c5a88; --on-accent:#ffffff; --mark:#bf7f12; --good:#2b7a4b; --warn:#a86300; --bad:#ad3636;
+  --f-display:"Bricolage Grotesque",system-ui,sans-serif;
+  --f-body:"Source Sans 3",system-ui,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#10161c; --surface:#17202a; --ink:#e2e8ee; --muted:#93a0ae; --line:#2b3743; --grid:#1f2933;
+  --accent:#86b5e2; --on-accent:#10161c; --mark:#e6ac45; --good:#5fc28c; --warn:#e6ac45; --bad:#e27a7a; color-scheme:dark}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 var(--f-body)}
+.wrap{max-width:1120px;margin:0 auto;padding-block:24px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:22px}
+h1{font:700 clamp(1.7rem,4.5vw,2.4rem)/1.05 var(--f-display);margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font:600 1.05rem/1.2 var(--f-display);margin:0}
+.sous{color:var(--muted);margin:.35rem 0 0;max-width:68ch}
+.grille{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:22px;align-items:start}
+@media (max-width:840px){.grille{grid-template-columns:minmax(0,1fr)}}
+form{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;display:grid;gap:14px}
+label{display:grid;gap:4px;font-weight:600;font-size:.9rem}
+.rang{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+input,select{font:inherit;font-weight:400;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);width:100%;min-width:0}
+input:focus-visible,select:focus-visible,button:focus-visible,.seg label:focus-within{outline:2px solid var(--accent);outline-offset:1px}
+.seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg label{flex:1;display:block;text-align:center;padding:8px;cursor:pointer;position:relative}
+.seg input{position:absolute;opacity:0;inset:0;cursor:pointer}
+.seg label:has(input:checked){background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent)}
+.ac{position:relative}
+.ac ul{position:absolute;z-index:1000;left:0;right:0;top:100%;margin:2px 0 0;padding:4px 0;list-style:none;background:var(--surface);border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 20px #0003;font-weight:400}
+.ac li{padding:8px 10px;cursor:pointer}
+.ac li small{display:block;color:var(--muted)}
+.ac li:hover,.ac li[aria-selected="true"]{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.lien{background:none;border:0;padding:0;color:var(--accent);font:600 .85rem var(--f-body);cursor:pointer;justify-self:start}
+button.principal{font:600 1rem var(--f-body);padding:11px;border:0;border-radius:6px;background:var(--accent);color:var(--on-accent);cursor:pointer}
+button.principal:disabled{opacity:.6;cursor:wait}
+.aide{font-size:.8rem;color:var(--muted);font-weight:400;margin:0}
+.res{display:grid;gap:16px;min-width:0}
+.bloc{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:grid;gap:10px;min-width:0}
+.chiffres{display:grid;grid-template-columns:1fr auto 1fr;align-items:end;gap:10px;font-variant-numeric:tabular-nums}
+.chiffres > div:last-child{text-align:right}
+.median{font:700 clamp(1.7rem,6vw,2.6rem)/1 var(--f-display);text-align:center}
+.lbl{font-size:.72rem;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.mono{font-family:var(--f-mono);font-size:.9rem}
+.barre{position:relative;height:8px;border-radius:4px;background:var(--grid)}
+.barre span{position:absolute;top:0;bottom:0;border-radius:4px;background:color-mix(in srgb,var(--accent) 45%,transparent)}
+.barre b{position:absolute;top:-4px;width:3px;height:16px;background:var(--mark);border-radius:2px}
+.faits{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:.88rem;color:var(--muted);margin:0;padding:0;list-style:none}
+.faits strong{color:var(--ink);font-variant-numeric:tabular-nums}
+.pill{display:inline-block;padding:2px 10px;border-radius:99px;font-weight:600;font-size:.82rem}
+#carte{height:380px;border-radius:10px;border:1px solid var(--line);z-index:0}
+.deux{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+@media (max-width:600px){.deux{grid-template-columns:minmax(0,1fr)}}
+.tableau{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:.86rem}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td:first-child{white-space:normal;min-width:14ch;max-width:26ch}
+th{font-weight:600;color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em}
+ul.ajust{margin:0;padding:0;list-style:none;display:grid;gap:4px;font-size:.9rem}
+ul.ajust li{display:flex;justify-content:space-between;gap:10px;font-variant-numeric:tabular-nums}
+.coche{display:flex;align-items:center;gap:8px;align-self:end;padding-bottom:10px;font-weight:600}
+.coche input{width:18px;height:18px;accent-color:var(--accent)}
+#historique{border-top:1px solid var(--line);padding-top:12px;display:grid;gap:8px}
+.entete-histo{display:flex;justify-content:space-between;align-items:baseline}
+#liste-histo{margin:0;padding:0;list-style:none;display:grid;gap:6px;font-size:.88rem}
+#liste-histo a{display:flex;justify-content:space-between;gap:10px;color:var(--ink);text-decoration:none;padding:6px 8px;border-radius:6px;background:var(--bg)}
+#liste-histo a:hover{background:color-mix(in srgb,var(--accent) 10%,var(--bg))}
+#liste-histo span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#liste-histo span:last-child{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap}
+.precision{font-size:.85rem;margin:0;padding:10px 12px;border-radius:8px;background:var(--bg)}
+.actions{display:flex;gap:16px;flex-wrap:wrap}
+.msg{padding:12px;border-radius:8px;background:color-mix(in srgb,var(--bad) 12%,transparent);margin:0}
+.attente{color:var(--muted);margin:0}
+footer{font-size:.8rem;color:var(--muted);max-width:80ch}
+footer a{color:var(--accent)}
+.leaflet-popup-content{font:14px/1.4 var(--f-body)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Estimateur DVF</h1>
+    <p class="sous">Estimation d'un appartement ou d'une maison à partir des ventes notariées réelles autour de l'adresse (Demandes de Valeurs Foncières).</p>
+  </header>
+
+  <div class="grille">
+    <form id="f" autocomplete="off" novalidate>
+      <div class="seg" role="radiogroup" aria-label="Type de bien">
+        <label><input type="radio" id="t-app" name="type" value="Appartement" checked>Appartement</label>
+        <label><input type="radio" id="t-mai" name="type" value="Maison">Maison</label>
+      </div>
+      <label class="ac" for="adresse">Adresse
+        <input id="adresse" placeholder="ex. 12 rue Paul Bert, Lyon" role="combobox" aria-autocomplete="list" aria-controls="sugg" aria-expanded="false">
+        <ul id="sugg" role="listbox" hidden></ul>
+      </label>
+      <button type="button" class="lien" id="ici">Utiliser ma position</button>
+      <div class="rang">
+        <label for="surface">Surface (m²)<input id="surface" type="number" inputmode="decimal" min="9" max="999" value="65"></label>
+        <label for="pieces">Pièces<input id="pieces" type="number" inputmode="numeric" min="1" max="20" value="3"></label>
+      </div>
+      <label for="etat">État
+        <select id="etat">
+          <option value="neuf">Neuf ou récent (+12 %)</option>
+          <option value="renove">Rénové (+6 %)</option>
+          <option value="bon" selected>Bon état (référence)</option>
+          <option value="rafraichir">À rafraîchir (−5 %)</option>
+          <option value="travaux">Gros travaux (−12 %)</option>
+        </select>
+      </label>
+      <label for="dpe">Classe énergie (DPE)
+        <select id="dpe">
+          <option value="">Je ne sais pas</option>
+          <option value="A">A (+6 %)</option><option value="B">B (+4 %)</option><option value="C">C (+2 %)</option>
+          <option value="D">D (référence)</option><option value="E">E (−3 %)</option>
+          <option value="F">F (−8 %)</option><option value="G">G (−12 %)</option>
+        </select>
+      </label>
+      <div class="rang" id="r-etage">
+        <label for="etage">Étage<input id="etage" type="number" inputmode="numeric" min="0" max="60" placeholder="0 = RDC"></label>
+        <label class="coche" for="ascenseur"><input id="ascenseur" type="checkbox">Ascenseur</label>
+      </div>
+      <div class="rang">
+        <label for="balcon">Balcon (m²)<input id="balcon" type="number" inputmode="decimal" min="0" value="0"></label>
+        <label for="terrasse">Terrasse (m²)<input id="terrasse" type="number" inputmode="decimal" min="0" value="0"></label>
+      </div>
+      <label for="terrain" id="l-terrain" hidden>Terrain (m²)<input id="terrain" type="number" inputmode="decimal" min="0" value="0"></label>
+      <p class="aide">Balcon compté à 30 % et terrasse à 40 % du prix au m² habitable.</p>
+      <button class="principal" id="go">Estimer</button>
+      <div id="historique" hidden>
+        <div class="entete-histo"><h2>Mes estimations</h2><button type="button" class="lien" id="vider">Effacer</button></div>
+        <ul id="liste-histo"></ul>
+      </div>
+    </form>
+
+    <section class="res" aria-live="polite">
+      <div class="bloc" id="fourchette"><p class="attente">Saisissez une adresse, choisissez-la dans la liste, puis lancez l'estimation.</p></div>
+      <div id="carte" role="region" aria-label="Carte des ventes comparables"></div>
+      <div class="deux" id="details" hidden>
+        <div class="bloc"><h2>Ajustements</h2><ul class="ajust" id="ajust"></ul></div>
+        <div class="bloc"><h2>Prix médian au m² par année</h2><svg id="tendance" viewBox="0 0 300 130" role="img" aria-label="Évolution du prix médian au m²"></svg><p class="aide">Biens comparables dans le rayon retenu.</p></div>
+      </div>
+      <div class="bloc" id="bloc-comps" hidden>
+        <h2>Ventes comparables retenues</h2>
+        <div class="tableau"><table>
+          <thead><tr><th>Adresse</th><th>Date</th><th>m²</th><th>P.</th><th>Prix</th><th>€/m² payé</th><th title="Prix au m² ramené au niveau du marché actuel">€/m² actuel</th><th>Dist.</th></tr></thead>
+          <tbody id="comps"></tbody>
+        </table></div>
+      </div>
+    </section>
+  </div>
+
+  <footer id="pied">
+    Données : <a href="https://www.data.gouv.fr/datasets/demandes-de-valeurs-foncieres-geolocalisees" target="_blank" rel="noopener">DVF géolocalisées</a> (DGFiP, Etalab),
+    adresses : <a href="https://geoservices.ign.fr/documentation/services/services-geoplateforme/geocodage" target="_blank" rel="noopener">Géoplateforme IGN</a>,
+    fonds de carte : © OpenStreetMap. Pas de données pour le Bas-Rhin, le Haut-Rhin, la Moselle et Mayotte.
+    Cette estimation est indicative et ne remplace pas l'avis d'un professionnel.
+  </footer>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="estimation.js"></script>
+<script>
+"use strict";
+const E = window.Estimation;
+const $ = q => document.querySelector(q);
+const eur = n => Math.round(n).toLocaleString("fr-FR") + " €";
+const pct = n => (n > 0.0005 ? "+" : n < -0.0005 ? "−" : "") + Math.abs(Math.round(n * 100)) + " %";
+const echap = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+let choix = null;         // {label, lat, lon, insee}
+let meta = null, indices = null, precision = null;
+const cacheTuiles = new Map();
+const json = f => fetch(f).then(r => r.ok ? r.json() : null).catch(() => null);
+const pret = Promise.all([json("data/meta.json"), json("data/indices.json"), json("data/precision.json")])
+  .then(([m, i, p]) => { meta = m; indices = i; precision = p; });
+const nomSemestre = s => s ? `${s.endsWith("1") ? "1er" : "2e"} semestre ${s.slice(0, 4)}` : "";
+
+/* ---------- Carte ---------- */
+const carte = L.map("carte", {scrollWheelZoom: false}).setView([46.6, 2.4], 5);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 19, attribution: "© OpenStreetMap"}).addTo(carte);
+const couche = L.layerGroup().addTo(carte);
+
+
+/* ---------- Géocodage (Géoplateforme IGN, qui a remplacé api-adresse.data.gouv.fr) ---------- */
+const GEO = "https://data.geopf.fr/geocodage";
+const versChoix = f => ({label: f.properties.label, insee: f.properties.citycode,
+  lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], ctx: f.properties.context || ""});
+
+async function chercherAdresses(q) {
+  const r = await fetch(`${GEO}/search?q=${encodeURIComponent(q)}&index=address&limit=6&autocomplete=1`);
+  if (!r.ok) throw new Error("geocodage");
+  return (await r.json()).features.map(versChoix);
+}
+
+let minuteur = null, suggestions = [], actif = -1, requete = 0;
+const ul = $("#sugg"), champ = $("#adresse");
+function fermer() { ul.hidden = true; champ.setAttribute("aria-expanded", "false"); actif = -1; }
+function choisir(s) { choix = s; champ.value = s.label; fermer(); }
+function dessinerSuggestions() {
+  ul.innerHTML = "";
+  suggestions.forEach((s, i) => {
+    const li = document.createElement("li");
+    li.id = "s" + i; li.setAttribute("role", "option"); li.setAttribute("aria-selected", i === actif);
+    li.innerHTML = `${echap(s.label)}<small>${echap(s.ctx)}</small>`;
+    li.addEventListener("mousedown", e => { e.preventDefault(); choisir(s); });
+    ul.appendChild(li);
+  });
+  ul.hidden = !suggestions.length; champ.setAttribute("aria-expanded", String(!ul.hidden));
+  champ.setAttribute("aria-activedescendant", actif >= 0 ? "s" + actif : "");
+}
+champ.addEventListener("input", () => {
+  choix = null; clearTimeout(minuteur);
+  const q = champ.value.trim();
+  if (q.length < 3) { fermer(); return; }
+  minuteur = setTimeout(async () => {
+    const n = ++requete;
+    try { const s = await chercherAdresses(q); if (n === requete) { suggestions = s; actif = -1; dessinerSuggestions(); } }
+    catch { if (n === requete) { suggestions = []; fermer(); } }
+  }, 220);
+});
+champ.addEventListener("keydown", e => {
+  if (ul.hidden) return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); actif = (actif + (e.key === "ArrowDown" ? 1 : -1) + suggestions.length) % suggestions.length; dessinerSuggestions(); }
+  else if (e.key === "Enter" && actif >= 0) { e.preventDefault(); choisir(suggestions[actif]); }
+  else if (e.key === "Escape") fermer();
+});
+champ.addEventListener("blur", () => setTimeout(fermer, 100));
+
+$("#ici").addEventListener("click", () => {
+  if (!navigator.geolocation) { erreur("Votre navigateur ne donne pas accès à votre position."); return; }
+  $("#ici").textContent = "Localisation…";
+  navigator.geolocation.getCurrentPosition(async p => {
+    try {
+      const r = await fetch(`${GEO}/reverse?lon=${p.coords.longitude}&lat=${p.coords.latitude}&index=address&limit=1`);
+      const f = (await r.json()).features[0];
+      if (!f) throw new Error();
+      choisir({...versChoix(f), lat: p.coords.latitude, lon: p.coords.longitude});
+    } catch { erreur("Aucune adresse trouvée à votre position. Saisissez-la à la main."); }
+    $("#ici").textContent = "Utiliser ma position";
+  }, () => { erreur("Position refusée ou indisponible. Saisissez l'adresse à la main."); $("#ici").textContent = "Utiliser ma position"; },
+  {enableHighAccuracy: true, timeout: 10000});
+});
+
+/* ---------- Données DVF : tuiles préparées par GitHub Actions ---------- */
+async function tuile(cle) {
+  if (!cacheTuiles.has(cle)) {
+    cacheTuiles.set(cle, fetch(`data/tuiles/${cle}.json`)
+      .then(r => r.ok ? r.json().then(E.lireTuile) : [])
+      .catch(() => []));
+  }
+  return cacheTuiles.get(cle);
+}
+async function ventesAutour(lat, lon) {
+  return (await Promise.all(E.tuilesAutour(lat, lon).map(tuile))).flat();
+}
+
+/* ---------- Formulaire ---------- */
+function majType() {
+  const maison = document.querySelector("[name=type]:checked").value === "Maison";
+  $("#l-terrain").hidden = !maison; $("#r-etage").hidden = maison;
+}
+document.querySelectorAll("[name=type]").forEach(r => r.addEventListener("change", majType));
+const nombre = id => Math.max(0, parseFloat(String($(id).value).replace(",", ".")) || 0);
+
+$("#f").addEventListener("submit", async e => {
+  e.preventDefault();
+  if (!choix) { erreur("Choisissez une adresse dans la liste proposée."); champ.focus(); return; }
+  if (E.HORS_DVF.includes(E.departement(choix.insee))) {
+    erreur("Les ventes de ce département ne sont pas publiées dans DVF (Alsace-Moselle et Mayotte relèvent du Livre foncier). Aucune estimation n'est possible ici.");
+    return;
+  }
+  const surface = nombre("#surface");
+  if (surface < 9) { erreur("Indiquez une surface habitable d'au moins 9 m²."); return; }
+  const bien = {lat: choix.lat, lon: choix.lon, type: document.querySelector("[name=type]:checked").value,
+    surface, pieces: Math.round(nombre("#pieces")) || null, etat: $("#etat").value, dpe: $("#dpe").value,
+    etage: $("#etage").value === "" ? null : Math.round(nombre("#etage")), ascenseur: $("#ascenseur").checked,
+    balcon: nombre("#balcon"), terrasse: nombre("#terrasse"), terrain: nombre("#terrain")};
+  const bouton = $("#go"); bouton.disabled = true; bouton.textContent = "Recherche des ventes…";
+  try {
+    const [ventes] = await Promise.all([ventesAutour(bien.lat, bien.lon), pret]);
+    const r = E.estimer(ventes, bien, new Date(), {indices});
+    memoriserDansLien(bien);
+    if (r.ok) { afficher(r, bien); ajouterHistorique(bien, r); } else erreur(r.message, bien, r.rayon);
+  } catch (err) {
+    console.error(err); erreur("Les données n'ont pas pu être chargées. Vérifiez votre connexion et réessayez.");
+  } finally { bouton.disabled = false; bouton.textContent = "Estimer"; }
+});
+
+function erreur(m, bien, rayon) {
+  $("#fourchette").innerHTML = `<p class="msg">${echap(m)}</p>`;
+  $("#details").hidden = $("#bloc-comps").hidden = true;
+  couche.clearLayers();
+  if (bien) { L.circleMarker([bien.lat, bien.lon], {radius: 8, color: css("--mark"), fillOpacity: 1}).addTo(couche); carte.setView([bien.lat, bien.lon], 13); }
+}
+
+function afficher(r, bien) {
+  const couleur = {élevée: "--good", moyenne: "--warn", faible: "--bad"}[r.fiabilite.niveau];
+  const e = r.estimation, lo = e.bas * 0.9, hi = e.haut * 1.1, P = v => ((v - lo) / (hi - lo) * 100).toFixed(1);
+  const derniere = meta?.derniere_vente ? new Date(meta.derniere_vente).toLocaleDateString("fr-FR") : null;
+  $("#fourchette").innerHTML = `
+    <div class="chiffres">
+      <div><div class="lbl">Bas</div><div class="mono">${eur(e.bas)}</div></div>
+      <div><div class="lbl" style="text-align:center">Estimation</div><div class="median">${eur(e.median)}</div></div>
+      <div><div class="lbl">Haut</div><div class="mono">${eur(e.haut)}</div></div>
+    </div>
+    <div class="barre" aria-hidden="true"><span style="left:${P(e.bas)}%;right:${100 - P(e.haut)}%"></span><b style="left:calc(${P(e.median)}% - 1.5px)"></b></div>
+    <ul class="faits">
+      <li><strong>${eur(r.prixM2.median)}</strong>/m² médian</li>
+      <li><strong>${r.comparables.length}</strong> ventes dans <strong>${r.rayon.toLocaleString("fr-FR")} m</strong></li>
+      <li>${r.fenetre ? "sur les 36 derniers mois" : "sur toutes les années disponibles"}</li>
+      <li><span class="pill" style="background:color-mix(in srgb,var(${couleur}) 16%,transparent);color:var(${couleur})">Fiabilité ${r.fiabilite.niveau} · ${r.fiabilite.score}/100</span></li>
+    </ul>
+    ${textePrecision(r.fiabilite.niveau)}
+    <p class="aide">${echap(choix.label)}${derniere ? ` · Dernière vente publiée : ${derniere}. DVF a environ 6 mois de retard sur les actes signés.` : ""}</p>
+    <div class="actions"><button type="button" class="lien" id="partager">Partager cette estimation</button></div>`;
+  $("#partager").addEventListener("click", partager);
+
+  $("#ajust").innerHTML = `
+    <li><span>Surface habitable</span><span class="mono">${bien.surface} m²</span></li>
+    <li><span>Annexes pondérées</span><span class="mono">+${(r.surfacePonderee - bien.surface).toFixed(1)} m²</span></li>
+    <li><span>État du logement</span><span class="mono">${pct(r.ajustements.etat)}</span></li>
+    <li><span>Classe énergie${bien.dpe ? " " + bien.dpe : " non renseignée"}</span><span class="mono">${pct(r.ajustements.dpe)}</span></li>
+    ${bien.type === "Appartement" ? `<li><span>Étage${bien.etage === null ? " non renseigné" : bien.etage === 0 ? " : rez-de-chaussée" : ` : ${bien.etage}${bien.etage === 1 ? "er" : "e"}${bien.ascenseur ? " avec ascenseur" : " sans ascenseur"}`}</span><span class="mono">${pct(r.ajustements.etage)}</span></li>` : ""}
+    ${bien.type === "Maison" ? `<li><span>Terrain par rapport aux comparables</span><span class="mono">${pct(r.ajustements.terrain)}</span></li>` : ""}
+    <li style="border-top:1px solid var(--line);padding-top:4px"><strong>Coefficient total</strong><strong class="mono">${pct(r.ajustements.total)}</strong></li>
+    ${r.reference ? `<li class="aide" style="display:block">Les ventes anciennes sont ramenées aux prix du ${nomSemestre(r.reference)}, d'après l'évolution des prix dans le département.</li>` : ""}`;
+  tendance(r.tendance);
+
+  $("#comps").innerHTML = r.comparables.map(v => `<tr><td>${echap(v.adresse)}</td>
+    <td>${new Date(v.date).toLocaleDateString("fr-FR", {month: "short", year: "numeric"})}</td><td>${v.surface}</td><td>${v.pieces || "–"}</td>
+    <td>${eur(v.prix)}</td><td>${eur(v.prixM2Brut)}</td><td>${eur(v.prixM2)}</td><td>${Math.round(v.distance)} m</td></tr>`).join("");
+  $("#details").hidden = $("#bloc-comps").hidden = false;
+
+  couche.clearLayers();
+  const zone = L.circle([bien.lat, bien.lon], {radius: r.rayon, color: css("--accent"), weight: 1, dashArray: "4 4", fillOpacity: 0.05}).addTo(couche);
+  r.comparables.forEach(v => L.circleMarker([v.lat, v.lon], {radius: 6, color: css("--accent"), weight: 1, fillOpacity: 0.75})
+    .bindPopup(`<strong>${echap(v.adresse)}</strong><br>${v.surface} m² · ${v.pieces || "?"} p. · ${new Date(v.date).toLocaleDateString("fr-FR")}<br>${eur(v.prix)} · ${eur(v.prixM2)}/m²`).addTo(couche));
+  L.circleMarker([bien.lat, bien.lon], {radius: 9, color: css("--surface"), weight: 2, fillColor: css("--mark"), fillOpacity: 1}).bindPopup("Votre bien").addTo(couche);
+  carte.fitBounds(zone.getBounds(), {padding: [10, 10]});
+}
+
+function tendance(t) {
+  const svg = $("#tendance");
+  if (t.length < 2) { svg.innerHTML = `<text x="150" y="65" text-anchor="middle" font-size="11" fill="var(--muted)">Pas assez de ventes par année</text>`; return; }
+  const vals = t.map(d => d.median);
+  const pas = (Math.max(...vals) - Math.min(...vals)) > 1500 ? 1000 : 500;
+  const lo = Math.floor(Math.min(...vals) * 0.95 / pas) * pas, hi = Math.ceil(Math.max(...vals) * 1.03 / pas) * pas;
+  const X = i => 46 + i * (238 / (t.length - 1)), Y = v => 108 - (v - lo) / (hi - lo) * 92;
+  const ticks = []; for (let v = lo; v <= hi; v += pas) ticks.push(v);
+  const ligne = t.map((d, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(d.median).toFixed(1)}`).join("");
+  svg.innerHTML = `${ticks.map(v => `<line x1="46" x2="286" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grid)"/><text x="40" y="${Y(v) + 3}" text-anchor="end" font-size="8.5" fill="var(--muted)" font-family="var(--f-mono)">${(v / 1000).toLocaleString("fr-FR")} k€</text>`).join("")}
+    <path d="${ligne}L${X(t.length - 1)},108L46,108Z" fill="var(--accent)" fill-opacity=".1"/>
+    <path d="${ligne}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+    ${t.map((d, i) => `<circle cx="${X(i)}" cy="${Y(d.median)}" r="${i === t.length - 1 ? 3.5 : 2.2}" fill="var(--accent)"><title>${d.an} : ${eur(d.median)}/m² (${d.ventes} ventes)</title></circle>
+      <text x="${X(i)}" y="124" text-anchor="middle" font-size="8.5" fill="var(--muted)" font-family="var(--f-mono)">${d.an}</text>`).join("")}`;
+}
+
+/* ---------- Précision mesurée sur des ventes réelles (scripts/mesurer_precision.js) ---------- */
+function textePrecision(niveau) {
+  if (!precision?.estimees) return "";
+  const p = precision.par_fiabilite?.[niveau];
+  const nb = n => n.toLocaleString("fr-FR");
+  return `<p class="precision">Précision mesurée sur ${nb(precision.estimees)} ventes de l'année écoulée : erreur médiane de
+    <strong>${precision.erreur_mediane.toLocaleString("fr-FR")} %</strong>${p?.estimees >= 30 ? `, et de <strong>${p.erreur_mediane.toLocaleString("fr-FR")} %</strong> quand la fiabilité est ${niveau}` : ""}.
+    Le prix réel tombe dans la fourchette dans ${Math.round(precision.part_dans_fourchette)} % des cas.</p>`;
+}
+
+/* ---------- Lien partageable : l'estimation est rejouée à l'ouverture du lien ---------- */
+function memoriserDansLien(b) {
+  const p = new URLSearchParams({adresse: choix.label, lat: b.lat.toFixed(6), lon: b.lon.toFixed(6), insee: choix.insee,
+    type: b.type, surface: b.surface, etat: b.etat});
+  if (b.pieces) p.set("pieces", b.pieces);
+  if (b.dpe) p.set("dpe", b.dpe);
+  if (b.type === "Appartement" && b.etage !== null) { p.set("etage", b.etage); if (b.ascenseur) p.set("ascenseur", "1"); }
+  for (const k of ["balcon", "terrasse", "terrain"]) if (b[k]) p.set(k, b[k]);
+  history.replaceState(null, "", "?" + p);
+}
+async function partager() {
+  const url = location.href, bouton = $("#partager");
+  if (navigator.share) { try { await navigator.share({title: "Estimation DVF", text: choix.label, url}); return; } catch (e) { if (e.name === "AbortError") return; } }
+  try { await navigator.clipboard.writeText(url); bouton.textContent = "Lien copié"; }
+  catch { prompt("Copiez ce lien :", url); }
+  setTimeout(() => { bouton.textContent = "Partager cette estimation"; }, 2500);
+}
+(function depuisLien() {
+  const p = new URLSearchParams(location.search);
+  if (!p.has("lat") || !p.has("insee")) return;
+  choix = {label: p.get("adresse") || "Adresse partagée", lat: +p.get("lat"), lon: +p.get("lon"), insee: p.get("insee"), ctx: ""};
+  champ.value = choix.label;
+  if (p.get("type") === "Maison") $("#t-mai").checked = true;
+  majType();
+  for (const k of ["surface", "pieces", "balcon", "terrasse", "terrain", "etage"]) if (p.has(k)) $("#" + k).value = p.get(k);
+  if (p.has("etat") && E.ETATS[p.get("etat")] !== undefined) $("#etat").value = p.get("etat");
+  if (p.has("dpe") && E.DPE[p.get("dpe")] !== undefined) $("#dpe").value = p.get("dpe");
+  $("#ascenseur").checked = p.get("ascenseur") === "1";
+  $("#f").requestSubmit();
+})();
+
+/* ---------- Historique des estimations (gardé sur cet appareil uniquement) ---------- */
+const CLE_HISTO = "estimateur-dvf:historique";
+function lireHistorique() { try { return JSON.parse(localStorage.getItem(CLE_HISTO)) || []; } catch { return []; } }
+function ecrireHistorique(h) { try { localStorage.setItem(CLE_HISTO, JSON.stringify(h)); } catch {} }
+function ajouterHistorique(bien, r) {
+  const entree = {lien: location.search, adresse: choix.label, type: bien.type, surface: bien.surface,
+    prix: r.estimation.median, le: new Date().toISOString().slice(0, 10)};
+  ecrireHistorique([entree, ...lireHistorique().filter(e => e.lien !== entree.lien)].slice(0, 12));
+  dessinerHistorique();
+}
+function dessinerHistorique() {
+  const h = lireHistorique();
+  $("#historique").hidden = !h.length;
+  $("#liste-histo").innerHTML = h.map(e => `<li><a href="${echap(e.lien)}" title="${echap(e.adresse)}">
+    <span>${e.type === "Maison" ? "Maison" : "Appart."} ${e.surface} m² · ${echap(e.adresse.replace(/\s\d{5}\s/, " "))}</span><span>${eur(e.prix)}</span></a></li>`).join("");
+}
+$("#vider").addEventListener("click", () => { ecrireHistorique([]); dessinerHistorique(); });
+dessinerHistorique();
+
+/* ---------- Application installable (fonctionne aussi sans réseau pour l'interface) ---------- */
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+</script>
+</body>
+</html>
