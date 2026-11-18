@@ -1,8 +1,8 @@
 /* Service worker : rend l'appli installable et garde l'interface disponible sans réseau.
    Les données DVF passent par le réseau en priorité (pour être toujours à jour) ; les zones
    déjà consultées restent en mémoire et permettent de refaire une estimation hors ligne. */
-const VERSION = "v2";
-const COQUILLE = ["./", "index.html", "estimation.js", "manifest.webmanifest", "icones/icone.svg", "icones/icone-192.png"];
+const VERSION = "v3";
+const COQUILLE = ["./", "index.html", "estimation.js", "nuisances.js", "manifest.webmanifest", "icones/icone.svg", "icones/icone-192.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open("coquille-" + VERSION).then(c => c.addAll(COQUILLE)).then(() => self.skipWaiting()));

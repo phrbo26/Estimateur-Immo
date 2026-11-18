@@ -89,6 +89,12 @@ ul.ajust li{display:flex;justify-content:space-between;gap:10px;font-variant-num
 #liste-histo span:last-child{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap}
 .precision{font-size:.85rem;margin:0;padding:10px 12px;border-radius:8px;background:var(--bg)}
 .actions{display:flex;gap:16px;flex-wrap:wrap}
+.nuis{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.nuis li{display:flex;gap:10px;align-items:baseline}
+.nuis .pt{width:10px;height:10px;border-radius:50%;flex:none;transform:translateY(1px)}
+.nuis .n-colle .pt{background:var(--bad)}.nuis .n-proche .pt{background:var(--warn)}.nuis .n-loin .pt{background:var(--line);border:1px solid var(--mark)}
+.nuis strong{font-weight:600}.nuis .d{margin-left:auto;white-space:nowrap;color:var(--muted, inherit);opacity:.8}
+.nuis .ras .pt{background:var(--good)}
 .msg{padding:12px;border-radius:8px;background:color-mix(in srgb,var(--bad) 12%,transparent);margin:0}
 .attente{color:var(--muted);margin:0}
 footer{font-size:.8rem;color:var(--muted);max-width:80ch}
@@ -154,6 +160,11 @@ footer a{color:var(--accent)}
 
     <section class="res" aria-live="polite">
       <div class="bloc" id="fourchette"><p class="attente">Saisissez une adresse, choisissez-la dans la liste, puis lancez l'estimation.</p></div>
+      <div class="bloc" id="bloc-nuisances" hidden>
+        <h2>Environnement immédiat</h2>
+        <ul class="nuis" id="nuisances"></ul>
+        <p class="aide">D'après OpenStreetMap, autour de l'adresse. Simple repère à vérifier sur place : n'entre pas dans le calcul de l'estimation.</p>
+      </div>
       <div id="carte" role="region" aria-label="Carte des ventes comparables"></div>
       <div class="deux" id="details" hidden>
         <div class="bloc"><h2>Ajustements</h2><ul class="ajust" id="ajust"></ul></div>
@@ -179,6 +190,7 @@ footer a{color:var(--accent)}
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script src="estimation.js"></script>
+<script src="nuisances.js"></script>
 <script>
 "use strict";
 const E = window.Estimation;
@@ -302,10 +314,43 @@ $("#f").addEventListener("submit", async e => {
     const r = E.estimer(ventes, bien, new Date(), {indices});
     memoriserDansLien(bien);
     if (r.ok) { afficher(r, bien); ajouterHistorique(bien, r); } else erreur(r.message, bien, r.rayon);
+    verifierNuisances(bien);  // affichage seul : ne modifie pas l'estimation
   } catch (err) {
     console.error(err); erreur("Les données n'ont pas pu être chargées. Vérifiez votre connexion et réessayez.");
   } finally { bouton.disabled = false; bouton.textContent = "Estimer"; }
 });
+
+/* ---------- Nuisances autour de l'adresse (OpenStreetMap) : avertissement, hors calcul ---------- */
+const coucheNuisances = L.layerGroup().addTo(carte);
+let rechercheNuisances = null;
+async function verifierNuisances(bien) {
+  if (!window.Nuisances) return;
+  rechercheNuisances?.abort();
+  const ctrl = rechercheNuisances = new AbortController();
+  const liste = $("#nuisances");
+  $("#bloc-nuisances").hidden = false;
+  liste.innerHTML = `<li>Recherche des autoroutes, voies ferrées et lignes haute tension autour…</li>`;
+  coucheNuisances.clearLayers();
+  try {
+    const r = await Nuisances.chercher(bien.lat, bien.lon, ctrl.signal);
+    if (ctrl.signal.aborted) return;
+    if (!r.length) {
+      liste.innerHTML = `<li class="ras"><span class="pt"></span><span>Rien de signalé à proximité : ni autoroute, voie rapide, voie ferrée, ligne haute tension ni zone industrielle.</span></li>`;
+      return;
+    }
+    const classe = { "collé": "n-colle", "proche": "n-proche", "à proximité": "n-loin" };
+    const couleur = { "collé": css("--bad"), "proche": css("--warn"), "à proximité": css("--mark") };
+    const dist = d => d === 0 ? "sur place" : d >= 1000 ? `${(d / 1000).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} km` : `${d} m`;
+    liste.innerHTML = r.map(x => `<li class="${classe[x.niveau]}"><span class="pt"></span>
+      <span><strong>${echap(x.nom)}</strong>${x.detail ? ` (${echap(x.detail)})` : ""} · ${x.niveau}</span><span class="d">${dist(x.distance)}</span></li>`).join("");
+    for (const x of r) for (const l of x.lignes) {
+      if (l.length > 1) L.polyline(l, { color: couleur[x.niveau], weight: 4, opacity: 0.8 }).bindTooltip(x.nom).addTo(coucheNuisances);
+    }
+  } catch (e) {
+    if (e.name === "AbortError") return;
+    liste.innerHTML = `<li>Vérification des nuisances impossible pour le moment (service OpenStreetMap indisponible).</li>`;
+  }
+}
 
 function erreur(m, bien, rayon) {
   $("#fourchette").innerHTML = `<p class="msg">${echap(m)}</p>`;

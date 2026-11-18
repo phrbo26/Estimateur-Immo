@@ -52,6 +52,9 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Tests des nuisances
+        run: node scripts/test_nuisances.js
+
       # Estime 3 000 ventes réelles de l'année écoulée comme si elles n'avaient pas encore eu lieu,
       # puis compare au prix payé. Le résultat est affiché sur le site.
       - name: Mesurer la précision

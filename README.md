@@ -53,6 +53,17 @@ Pour forcer une mise à jour des données : **Actions → Publier le site → Ru
    au m²), terrasse (40 %), terrain des maisons comparé à la médiane des comparables (±8 % au plus).
 8. **Indice de fiabilité** sur 100 : nombre de ventes, rayon nécessaire, dispersion des prix, ancienneté.
 
+## Nuisances autour de l'adresse
+
+Après chaque estimation, `site/nuisances.js` interroge OpenStreetMap (API Overpass) autour de l'adresse et signale
+les autoroutes, voies rapides, grandes routes très proches, voies ferrées (LGV comprises), lignes haute tension,
+zones industrielles, aérodromes et sites nucléaires, avec leur distance et un niveau (collé, proche, à proximité).
+Les tracés apparaissent en couleur sur la carte.
+
+C'est un **simple avertissement** : il ne modifie pas l'estimation. `estimation.js` n'en dépend pas, si bien que
+l'appli d'annonces (Annonce-immo-), qui réutilise `estimation.js` pour comparer les annonces au marché, n'est pas concernée.
+Tests : `node scripts/test_nuisances.js`.
+
 ## Précision mesurée
 
 À chaque publication, `scripts/mesurer_precision.js` tire 3 000 ventes de l'année écoulée, au prorata
